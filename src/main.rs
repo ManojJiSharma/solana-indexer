@@ -7,14 +7,14 @@ mod indexer;
 
 #[tokio::main]
 async fn main() {
+    // Initialize tracing for logging
+    tracing_subscriber::fmt::init();
 
-    // tracing_subscriber::fmt::init();
-
-    let (tx,mut  rx) = mpsc::channel(10);
+    let (tx, mut rx) = mpsc::channel(10);
 
     tokio::spawn(async move {
         let url = "wss://api.devnet.solana.com";
-        if let Err(e) = connect_rpc(url,tx).await {
+        if let Err(e) = connect_rpc(url, tx).await {
             eprintln!("WebSocket error: {}", e);
         }
     });

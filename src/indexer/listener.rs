@@ -1,5 +1,3 @@
-// use std::str::FromStr;
-
 use tokio::sync::mpsc::Sender;
 
 use futures_util::{SinkExt, StreamExt};
@@ -30,20 +28,20 @@ pub async fn connect_rpc(ws_url: &str, sender: Sender<LogEvent>) -> anyhow::Resu
       "id": 1,
       "method": "logsSubscribe",
       "params": [
-    "all",
-    { "commitment": "finalized" }
-    ],
+        "all",
+        { "commitment": "finalized" }
+      ]
     });
 
-    let subscribe = write.send(subscribe_msg.to_string().into()).await;
+    write.send(subscribe_msg.to_string().into()).await?;
 
-    println!("Subscribed  {:?}", subscribe);
+    println!("Subscribed to transaction logs");
 
     while let Some(msg) = read.next().await {
         let msg = match msg {
             Ok(m) => m,
             Err(e) => {
-                println!("error in msg : {}", e);
+                eprintln!("error in msg : {}", e);
                 break;
             }
         };
@@ -53,7 +51,20 @@ pub async fn connect_rpc(ws_url: &str, sender: Sender<LogEvent>) -> anyhow::Resu
             Err(_) => continue,
         };
 
-        let v: Value = serde_json::from_str(text).ok().unwrap();
+        let v: Value = match serde_json::from_str(text) {
+            Ok(val) => val,
+            Err(_) => continue,
+        };
+
+        // Skip subscription confirmation messages
+        if v.get("result").is_some() && v.get("id").is_some() {
+            continue;
+        }
+
+        // Only process notification messages
+        if v.get("params").is_none() {
+            continue;
+        }
 
         let result = &v["params"]["result"];
 
@@ -71,13 +82,19 @@ pub async fn connect_rpc(ws_url: &str, sender: Sender<LogEvent>) -> anyhow::Resu
             .filter_map(|l| l.as_str().map(String::from))
             .collect::<Vec<_>>();
 
+        if signature.is_empty() {
+            continue;
+        }
+
         let log_event = LogEvent {
             signature,
             slot,
             logs,
         };
 
-        let _ = sender.send(log_event).await;
+        if sender.send(log_event).await.is_err() {
+            break;
+        }
     }
 
     Ok(())
