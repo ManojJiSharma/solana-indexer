@@ -1,8 +1,10 @@
+use std::future::pending;
+
 use tokio::sync::mpsc;
-use tracing::info;
 
-use crate::indexer::listener::connect_rpc;
+use crate::{db::pool::create_pool, indexer::listener::connect_rpc};
 
+mod db;
 mod indexer;
 
 #[tokio::main]
@@ -10,7 +12,9 @@ async fn main() {
     // Initialize tracing for logging
     tracing_subscriber::fmt::init();
 
-    let (tx, mut rx) = mpsc::channel(10);
+    let pool = create_pool().await.expect("Error while creating pool");
+
+    let (tx, rx) = mpsc::channel(10);
 
     tokio::spawn(async move {
         let url = "wss://api.devnet.solana.com";
@@ -19,12 +23,9 @@ async fn main() {
         }
     });
 
-    while let Some(event) = rx.recv().await {
-        info!(
-            "TX: {} | slot: {} | logs: {}",
-            event.signature,
-            event.slot,
-            event.logs.len()
-        );
-    }
+    tokio::spawn(async move {
+        db::writer::run_writer(rx, pool).await;
+    });
+
+    pending::<()>().await;
 }
