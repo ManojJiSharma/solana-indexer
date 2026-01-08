@@ -1,9 +1,13 @@
-use std::future::pending;
-
+use axum::Router;
 use tokio::sync::mpsc;
 
-use crate::{db::pool::create_pool, indexer::listener::connect_rpc};
+use crate::{
+    api::app_state::{self},
+    db::pool::create_pool,
+    indexer::listener::connect_rpc,
+};
 
+mod api;
 mod db;
 mod indexer;
 
@@ -22,10 +26,19 @@ async fn main() {
             eprintln!("WebSocket error: {}", e);
         }
     });
-
+    let value = pool.clone();
     tokio::spawn(async move {
         db::writer::run_writer(rx, pool).await;
     });
 
-    pending::<()>().await;
+    let state = app_state::AppState { db: value };
+
+    let app = Router::new()
+        .merge(api::routes::routers())
+        .with_state(state);
+
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000")
+        .await
+        .expect("Error on tcp listener bind");
+    axum::serve(listener, app).await.unwrap();
 }
